@@ -42,9 +42,34 @@ end
 local function literalReplace(s, from, to)
     return (s:gsub(escapePattern(from), function() return to end))
 end
+-- Translate inventory display only; preserve names, counts and unknown items.
+local function translateInventory(s)
+    if not s:find("^Inventory of ") then return nil end
+    return (s:gsub("[^\r\n]+", function(line)
+        local who = line:match("^Inventory of Local Player%s*(%b())%s*:%s*$")
+        if who then return (exact("Inventory of Local Player") or "Inventory of Local Player") .. " " .. who .. ":" end
+        local other = line:match("^Inventory of%s+(.+):%s*$")
+        if other then return (exact("Inventory of") or "Inventory of") .. " " .. other .. ":" end
+        local lead, item = line:match("^(%s*%-%s*)(.+)$")
+        if lead then
+            local name, quantity = item:match("^(.-)(%s+[xX]%d+%s*)$")
+            name = name or item
+            return lead .. (exact(trim(name)) or name) .. (quantity or "")
+        end
+        local key, sep, value = line:match("^(%s*[%a ]-)(%s*:%s*)(.*)$")
+        if key then
+            local cleanKey = trim(key)
+            if cleanKey == "Armour" or cleanKey == "Diamond" or cleanKey == "Coin" or cleanKey == "Stew" or cleanKey == "Items" then
+                return (exact(cleanKey) or cleanKey) .. sep .. (exact(trim(value)) or value)
+            end
+        end
+        return line
+    end))
+end
+
 local dynamicPrefixes = {
     "Total Playtime", "Total Diamonds Collected", "Furniture List",
-    "Fire Full", "Opens in", "Campfire", "Stronghold", "Status",
+    "Total Saplings", "Fire Full", "Opens in", "Campfire", "Stronghold", "Status",
     "Hunger", "Level", "Fire", "Limit", "Total", "Needed", "Ping", "FPS"
 }
 local dynamicValues = {"Monitoring", "Disabled", "Standby", "RAIDING", "CLEAR!", "Idle", "MAX", "Off", "On"}
@@ -52,6 +77,17 @@ local function translate(s)
     if type(s) ~= "string" or s == "" then return s end
     local direct = exact(s) or exact(trim(s))
     if direct then return direct end
+    local scanTarget = s:match("^Scan Output:%s*(.+)$")
+    if scanTarget then
+        return (exact("Scan Output") or "Scan Output") .. ": " .. (exact(scanTarget) or scanTarget)
+    end
+    local inventory = translateInventory(s)
+    if inventory then return inventory end
+    -- Translate the fire status suffix even if the status prefix is already localized.
+    local fuelStatus = "Automatically dropping fuels to reach max level."
+    if s:find(fuelStatus, 1, true) and exact(fuelStatus) then
+        s = literalReplace(s, fuelStatus, exact(fuelStatus))
+    end
     -- Preserve numeric values and only translate known status labels.
     local isStatus = false
     for _, key in ipairs(dynamicPrefixes) do
